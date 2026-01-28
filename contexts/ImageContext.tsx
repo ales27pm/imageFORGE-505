@@ -2,19 +2,22 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import createContextHook from '@nkzw/create-context-hook';
 import { useState, useCallback, useMemo, useEffect } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Platform } from 'react-native';
 import { GeneratedImage, AspectRatio, ASPECT_RATIO_MAP } from '@/types/image';
-import * as FileSystem from 'expo-file-system';
+import { File, Directory, Paths } from 'expo-file-system';
+import * as FileSystemLegacy from 'expo-file-system/legacy';
 
 const STORAGE_KEY = 'ai_forge_images';
-const MAX_STORED_IMAGES = 10; // Reduced since we are storing base64 as backup
+const MAX_STORED_IMAGES = 10;
 
-// Ensure document directory exists
-const imagesDir = ((FileSystem as any).documentDirectory || '') + 'images/';
+const imagesDir = Platform.OS !== 'web' ? new Directory(Paths.document, 'images') : null;
 
 async function ensureDirExists() {
-  const dirInfo = await FileSystem.getInfoAsync(imagesDir);
-  if (!dirInfo.exists) {
-    await FileSystem.makeDirectoryAsync(imagesDir, { intermediates: true });
+  if (Platform.OS === 'web' || !imagesDir) return;
+  try {
+    imagesDir.create({ intermediates: true, idempotent: true });
+  } catch (err) {
+    console.warn('[ImageContext] Failed to create images directory:', err);
   }
 }
 
@@ -43,11 +46,9 @@ async function generateImageAPI(prompt: string, size: string): Promise<{
   console.log('[ImageContext] Data mimeType:', data.image.mimeType);
   console.log('[ImageContext] Base64 length:', data.image.base64Data?.length);
 
-      // Clean base64 data by removing newlines and whitespace
   if (data.image?.base64Data) {
     let b64 = data.image.base64Data.replace(/[\r\n\s]+/g, '');
     
-    // Check if it starts with data URI scheme
     if (b64.startsWith('data:')) {
       const commaIndex = b64.indexOf(',');
       if (commaIndex !== -1) {
@@ -61,7 +62,6 @@ async function generateImageAPI(prompt: string, size: string): Promise<{
     data.image.base64Data = b64;
   }
 
-  // Ensure mimeType is present
   if (!data.image.mimeType) {
     data.image.mimeType = 'image/png';
   }
@@ -80,14 +80,23 @@ export const [ImageProvider, useImages] = createContextHook(() => {
       const stored = await AsyncStorage.getItem(STORAGE_KEY);
       const images = stored ? JSON.parse(stored) : [];
       
-      // Fix up URIs for current run (handling iOS sandbox path changes)
-      // and ensure we have valid file paths
+      if (Platform.OS === 'web') {
+        return images as GeneratedImage[];
+      }
+
       await ensureDirExists();
       
-      // Get list of actual files on disk
       let existingFiles: string[] = [];
       try {
-        existingFiles = await FileSystem.readDirectoryAsync(imagesDir);
+        if (imagesDir) {
+          const contents = imagesDir.list();
+          existingFiles = contents
+            .filter((item): item is File => !(item instanceof Directory))
+            .map((fileItem) => {
+              const parts = fileItem.uri.split('/');
+              return parts[parts.length - 1];
+            });
+        }
       } catch (e) {
         console.warn('[ImageContext] Failed to read images directory:', e);
       }
@@ -96,33 +105,32 @@ export const [ImageProvider, useImages] = createContextHook(() => {
       console.log('[ImageContext] Found', existingFiles.length, 'files on disk');
 
       const validImages = await Promise.all(images.map(async (img: GeneratedImage) => {
-         const filename = `${img.id}.png`; // Assuming png for now
-         const expectedUri = imagesDir + filename;
-         
-         // Check if file exists in our listing
-         if (existingFilesSet.has(filename)) {
-             img.uri = expectedUri;
-         } else {
-             // File missing!
-             console.warn('[ImageContext] File missing for image:', img.id);
-             
-             // If we have base64, try to restore the file
-             if (img.base64Data && img.base64Data.length > 100) {
-                 try {
-                     console.log('[ImageContext] Restoring file from base64 for:', img.id);
-                     await FileSystem.writeAsStringAsync(expectedUri, img.base64Data, {
-                         encoding: (FileSystem as any).EncodingType.Base64,
-                     });
-                     img.uri = expectedUri;
-                 } catch (err) {
-                     console.error('[ImageContext] Failed to restore file:', err);
-                     img.uri = ''; // Fallback to base64 rendering if possible
-                 }
-             } else {
-                 img.uri = '';
-             }
-         }
-         return img;
+        const filename = `${img.id}.png`;
+        const file = imagesDir ? new File(imagesDir, filename) : null;
+        const expectedUri = file?.uri || '';
+        
+        if (existingFilesSet.has(filename)) {
+          img.uri = expectedUri;
+        } else {
+          console.warn('[ImageContext] File missing for image:', img.id);
+          
+          if (img.base64Data && img.base64Data.length > 100 && file) {
+            try {
+              console.log('[ImageContext] Restoring file from base64 for:', img.id);
+              file.create({ overwrite: true, intermediates: true });
+              await FileSystemLegacy.writeAsStringAsync(file.uri, img.base64Data, {
+                encoding: FileSystemLegacy.EncodingType.Base64,
+              });
+              img.uri = file.uri;
+            } catch (err) {
+              console.error('[ImageContext] Failed to restore file:', err);
+              img.uri = '';
+            }
+          } else {
+            img.uri = '';
+          }
+        }
+        return img;
       }));
 
       console.log('[ImageContext] Loaded', validImages.length, 'images');
@@ -151,45 +159,46 @@ export const [ImageProvider, useImages] = createContextHook(() => {
       const newImage: GeneratedImage = {
         id: `img_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
         prompt,
-        base64Data: result.image.base64Data, // Keep base64 as backup
+        base64Data: result.image.base64Data,
         uri: '', 
         mimeType: result.image.mimeType,
         size: result.size,
         createdAt: Date.now(),
       };
 
-      // Save to file system
-      const filename = `${newImage.id}.png`;
-      const fileUri = imagesDir + filename;
-      
-      try {
-        await FileSystem.writeAsStringAsync(fileUri, result.image.base64Data, {
-          encoding: (FileSystem as any).EncodingType.Base64,
-        });
+      if (Platform.OS !== 'web' && imagesDir) {
+        const filename = `${newImage.id}.png`;
+        const file = new File(imagesDir, filename);
         
-        const fileInfo = await FileSystem.getInfoAsync(fileUri);
-        
-        if (fileInfo.exists) {
-            console.log('[ImageContext] Saved image to:', fileUri, 'size:', fileInfo.size);
+        try {
+          file.create({ overwrite: true, intermediates: true });
+          await FileSystemLegacy.writeAsStringAsync(file.uri, result.image.base64Data, {
+            encoding: FileSystemLegacy.EncodingType.Base64,
+          });
+          
+          const fileInfo = file.info();
+          
+          if (fileInfo.exists) {
+            console.log('[ImageContext] Saved image to:', file.uri, 'size:', fileInfo.size);
             
-            if (fileInfo.size < 100) {
-                 console.error('[ImageContext] File write appeared to succeed but file is missing or empty');
+            if (fileInfo.size != null && fileInfo.size < 100) {
+              console.error('[ImageContext] File write appeared to succeed but file is missing or empty');
             }
-        } else {
-             console.error('[ImageContext] File write failed, file does not exist');
-        }
+          } else {
+            console.error('[ImageContext] File write failed, file does not exist');
+          }
 
-        newImage.uri = fileUri;
-      } catch (error) {
-        console.error('[ImageContext] Failed to save image to file system:', error);
-        throw error;
+          newImage.uri = file.uri;
+        } catch (error) {
+          console.error('[ImageContext] Failed to save image to file system:', error);
+          throw error;
+        }
       }
 
       const currentImages = imagesQuery.data || [];
       const updatedImages = [newImage, ...currentImages];
       await saveImagesMutation.mutateAsync(updatedImages);
       
-      // Return with base64 for immediate display if needed, though URI should work
       return { ...newImage, base64Data: result.image.base64Data };
     },
   });
@@ -199,13 +208,13 @@ export const [ImageProvider, useImages] = createContextHook(() => {
   const deleteImage = useCallback(async (image: GeneratedImage) => {
     console.log('[ImageContext] Deleting image:', image.id);
     
-    // Delete file
-    if (image.uri) {
-        try {
-            await FileSystem.deleteAsync(image.uri, { idempotent: true });
-        } catch (e) {
-            console.warn('[ImageContext] Failed to delete file:', e);
-        }
+    if (image.uri && Platform.OS !== 'web') {
+      try {
+        const file = new File(image.uri);
+        file.delete();
+      } catch (e) {
+        console.warn('[ImageContext] Failed to delete file:', e);
+      }
     }
 
     const currentImages = imagesQuery.data || [];
@@ -216,16 +225,18 @@ export const [ImageProvider, useImages] = createContextHook(() => {
   const clearAllImages = useCallback(async () => {
     console.log('[ImageContext] Clearing all images');
     
-    // Delete all files
-    const currentImages = imagesQuery.data || [];
-    for (const img of currentImages) {
+    if (Platform.OS !== 'web') {
+      const currentImages = imagesQuery.data || [];
+      for (const img of currentImages) {
         if (img.uri) {
-            try {
-                await FileSystem.deleteAsync(img.uri, { idempotent: true });
-            } catch (e) {
-                console.warn('[ImageContext] Failed to delete file:', e);
-            }
+          try {
+            const file = new File(img.uri);
+            file.delete();
+          } catch (e) {
+            console.warn('[ImageContext] Failed to delete file:', e);
+          }
         }
+      }
     }
 
     await saveImagesAsync([]);

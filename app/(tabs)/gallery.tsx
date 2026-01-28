@@ -15,7 +15,8 @@ import { Image } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Trash2, X, ImageIcon, Clock, Share2 } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
-import * as FileSystem from 'expo-file-system';
+import { File, Paths } from 'expo-file-system';
+import * as FileSystemLegacy from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 import Colors from '@/constants/colors';
 import { useImages } from '@/contexts/ImageContext';
@@ -46,7 +47,6 @@ export default function GalleryScreen() {
           text: 'Delete',
           style: 'destructive',
           onPress: async () => {
-            // Find the image object to pass to deleteImage
             const imageToDelete = images.find(img => img.id === imageId);
             if (imageToDelete) {
                 await deleteImage(imageToDelete);
@@ -91,15 +91,23 @@ export default function GalleryScreen() {
       let fileUri = image.uri;
       
       if (!fileUri) {
-          if (!image.base64Data) {
-              Alert.alert('Error', 'Image data is missing');
-              return;
-          }
-          
-          fileUri = `${(FileSystem as any).cacheDirectory}share_${image.id}.png`;
-          await FileSystem.writeAsStringAsync(fileUri, image.base64Data, {
-            encoding: (FileSystem as any).EncodingType.Base64,
+        if (!image.base64Data) {
+          Alert.alert('Error', 'Image data is missing');
+          return;
+        }
+        
+        try {
+          const tempFile = new File(Paths.cache, `share_${image.id}.png`);
+          tempFile.create({ overwrite: true, intermediates: true });
+          await FileSystemLegacy.writeAsStringAsync(tempFile.uri, image.base64Data, {
+            encoding: FileSystemLegacy.EncodingType.Base64,
           });
+          fileUri = tempFile.uri;
+        } catch (e) {
+          console.error('[GalleryScreen] Failed to write share file:', e);
+          Alert.alert('Error', 'Failed to prepare image for sharing');
+          return;
+        }
       }
 
       const isAvailable = await Sharing.isAvailableAsync();
