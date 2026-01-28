@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback } from "react";
 import {
   StyleSheet,
   Text,
@@ -10,101 +10,99 @@ import {
   Alert,
   Platform,
   Image as RNImage,
-} from 'react-native';
-import { Image } from 'expo-image';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Trash2, X, ImageIcon, Clock, Share2 } from 'lucide-react-native';
-import * as Haptics from 'expo-haptics';
-import { File, Paths } from 'expo-file-system';
-import * as Sharing from 'expo-sharing';
-import Colors from '@/constants/colors';
-import { useImages } from '@/contexts/ImageContext';
-import { GeneratedImage } from '@/types/image';
+} from "react-native";
+import { Image } from "expo-image";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { Trash2, X, ImageIcon, Clock, Share2 } from "lucide-react-native";
+import * as Haptics from "expo-haptics";
+import { File, Paths } from "expo-file-system";
+import * as Sharing from "expo-sharing";
+import Colors from "@/constants/colors";
+import { useImages } from "@/contexts/ImageContext";
+import { GeneratedImage } from "@/types/image";
+import { base64ToUint8Array } from "@/utils/imageUtils";
 
-function base64ToUint8Array(base64: string): Uint8Array {
-  const binaryString = globalThis.atob(base64);
-  const len = binaryString.length;
-  const bytes = new Uint8Array(len);
-  for (let i = 0; i < len; i++) {
-    bytes[i] = binaryString.charCodeAt(i);
-  }
-  return bytes;
-}
-
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
+const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const IMAGE_SIZE = (SCREEN_WIDTH - 52) / 2;
 
 export default function GalleryScreen() {
   const insets = useSafeAreaInsets();
   const { images, deleteImage, clearAllImages } = useImages();
-  const [selectedImage, setSelectedImage] = useState<GeneratedImage | null>(null);
+  const [selectedImage, setSelectedImage] = useState<GeneratedImage | null>(
+    null,
+  );
 
   const handleImagePress = useCallback((image: GeneratedImage) => {
     Haptics.selectionAsync();
     setSelectedImage(image);
   }, []);
 
-  const handleDelete = useCallback(async (imageId: string) => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    
-    Alert.alert(
-      'Delete Image',
-      'Are you sure you want to delete this image?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            const imageToDelete = images.find(img => img.id === imageId);
-            if (imageToDelete) {
+  const handleDelete = useCallback(
+    async (imageId: string) => {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+
+      Alert.alert(
+        "Delete Image",
+        "Are you sure you want to delete this image?",
+        [
+          { text: "Cancel", style: "cancel" },
+          {
+            text: "Delete",
+            style: "destructive",
+            onPress: async () => {
+              const imageToDelete = images.find((img) => img.id === imageId);
+              if (imageToDelete) {
                 await deleteImage(imageToDelete);
                 setSelectedImage(null);
-                Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-            }
+                Haptics.notificationAsync(
+                  Haptics.NotificationFeedbackType.Success,
+                );
+              }
+            },
           },
-        },
-      ]
-    );
-  }, [deleteImage, images]);
+        ],
+      );
+    },
+    [deleteImage, images],
+  );
 
   const handleClearAll = useCallback(() => {
     if (images.length === 0) return;
-    
+
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
-    
+
     Alert.alert(
-      'Clear Gallery',
-      'This will delete all generated images. This action cannot be undone.',
+      "Clear Gallery",
+      "This will delete all generated images. This action cannot be undone.",
       [
-        { text: 'Cancel', style: 'cancel' },
+        { text: "Cancel", style: "cancel" },
         {
-          text: 'Clear All',
-          style: 'destructive',
+          text: "Clear All",
+          style: "destructive",
           onPress: async () => {
             await clearAllImages();
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
           },
         },
-      ]
+      ],
     );
   }, [images.length, clearAllImages]);
 
   const handleShare = useCallback(async (image: GeneratedImage) => {
     try {
-      if (Platform.OS === 'web') {
-        Alert.alert('Share', 'Sharing is not supported on web');
+      if (Platform.OS === "web") {
+        Alert.alert("Share", "Sharing is not supported on web");
         return;
       }
 
       let fileUri = image.uri;
-      
+
       if (!fileUri) {
         if (!image.base64Data) {
-          Alert.alert('Error', 'Image data is missing');
+          Alert.alert("Error", "Image data is missing");
           return;
         }
-        
+
         try {
           const tempFile = new File(Paths.cache, `share_${image.id}.png`);
           await tempFile.create({ overwrite: true, intermediates: true });
@@ -112,8 +110,8 @@ export default function GalleryScreen() {
           await tempFile.write(bytes);
           fileUri = tempFile.uri;
         } catch (e) {
-          console.error('[GalleryScreen] Failed to write share file:', e);
-          Alert.alert('Error', 'Failed to prepare image for sharing');
+          console.error("[GalleryScreen] Failed to write share file:", e);
+          Alert.alert("Error", "Failed to prepare image for sharing");
           return;
         }
       }
@@ -122,55 +120,60 @@ export default function GalleryScreen() {
       if (isAvailable) {
         await Sharing.shareAsync(fileUri);
       } else {
-        Alert.alert('Error', 'Sharing is not available on this device');
+        Alert.alert("Error", "Sharing is not available on this device");
       }
     } catch (error) {
-      console.error('[GalleryScreen] Share failed:', error);
-      Alert.alert('Error', 'Failed to share image');
+      console.error("[GalleryScreen] Share failed:", error);
+      Alert.alert("Error", "Failed to share image");
     }
   }, []);
 
   const formatDate = (timestamp: number) => {
     const date = new Date(timestamp);
-    return date.toLocaleDateString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
+    return date.toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
     });
   };
 
-  const renderItem = useCallback(({ item }: { item: GeneratedImage }) => {
-    let source;
-    if (item.uri) {
+  const renderItem = useCallback(
+    ({ item }: { item: GeneratedImage }) => {
+      let source;
+      if (item.uri) {
         source = { uri: item.uri };
-    } else if (item.base64Data && item.base64Data.length > 100) {
-        source = { uri: item.base64Data.startsWith('data:') 
-            ? item.base64Data 
-            : `data:${item.mimeType || 'image/png'};base64,${item.base64Data}` };
-    }
-    
-    return (
-      <TouchableOpacity
-        style={styles.imageCard}
-        onPress={() => handleImagePress(item)}
-        activeOpacity={0.85}
-      >
-        <Image 
-          source={source} 
-          style={styles.thumbnail} 
-          contentFit="cover"
-          transition={200}
-          cachePolicy="memory-disk"
-        />
-        <View style={styles.imageOverlay}>
-          <Text style={styles.imagePrompt} numberOfLines={2}>
-            {item.prompt}
-          </Text>
-        </View>
-      </TouchableOpacity>
-    );
-  }, [handleImagePress]);
+      } else if (item.base64Data && item.base64Data.length > 100) {
+        source = {
+          uri: item.base64Data.startsWith("data:")
+            ? item.base64Data
+            : `data:${item.mimeType || "image/png"};base64,${item.base64Data}`,
+        };
+      }
+
+      return (
+        <TouchableOpacity
+          style={styles.imageCard}
+          onPress={() => handleImagePress(item)}
+          activeOpacity={0.85}
+        >
+          <Image
+            source={source}
+            style={styles.thumbnail}
+            contentFit="cover"
+            transition={200}
+            cachePolicy="memory-disk"
+          />
+          <View style={styles.imageOverlay}>
+            <Text style={styles.imagePrompt} numberOfLines={2}>
+              {item.prompt}
+            </Text>
+          </View>
+        </TouchableOpacity>
+      );
+    },
+    [handleImagePress],
+  );
 
   const renderEmptyState = () => (
     <View style={styles.emptyState}>
@@ -185,13 +188,15 @@ export default function GalleryScreen() {
   );
 
   const selectedImageSource = selectedImage
-    ? (selectedImage.uri
-        ? { uri: selectedImage.uri }
-        : (selectedImage.base64Data && selectedImage.base64Data.length > 100
-            ? { uri: selectedImage.base64Data.startsWith('data:')
-                ? selectedImage.base64Data
-                : `data:${selectedImage.mimeType || 'image/png'};base64,${selectedImage.base64Data}` }
-            : undefined))
+    ? selectedImage.uri
+      ? { uri: selectedImage.uri }
+      : selectedImage.base64Data && selectedImage.base64Data.length > 100
+        ? {
+            uri: selectedImage.base64Data.startsWith("data:")
+              ? selectedImage.base64Data
+              : `data:${selectedImage.mimeType || "image/png"};base64,${selectedImage.base64Data}`,
+          }
+        : undefined
     : undefined;
 
   return (
@@ -200,7 +205,7 @@ export default function GalleryScreen() {
         <View>
           <Text style={styles.title}>Gallery</Text>
           <Text style={styles.subtitle}>
-            {images.length} {images.length === 1 ? 'image' : 'images'} created
+            {images.length} {images.length === 1 ? "image" : "images"} created
           </Text>
         </View>
         {images.length > 0 && (
@@ -253,12 +258,19 @@ export default function GalleryScreen() {
                     source={selectedImageSource}
                     style={styles.modalImage}
                     resizeMode="contain"
-                    onError={(e) => console.error('[Gallery] Image load error:', e.nativeEvent.error)}
+                    onError={(e) =>
+                      console.error(
+                        "[Gallery] Image load error:",
+                        e.nativeEvent.error,
+                      )
+                    }
                   />
                 </View>
 
                 <View style={styles.modalInfo}>
-                  <Text style={styles.modalPrompt}>&quot;{selectedImage.prompt}&quot;</Text>
+                  <Text style={styles.modalPrompt}>
+                    &quot;{selectedImage.prompt}&quot;
+                  </Text>
                   <View style={styles.modalMeta}>
                     <Clock size={14} color={Colors.textMuted} />
                     <Text style={styles.modalDate}>
@@ -301,16 +313,16 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.background,
   },
   header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
     paddingHorizontal: 20,
     paddingTop: 16,
     paddingBottom: 12,
   },
   title: {
     fontSize: 28,
-    fontWeight: '700',
+    fontWeight: "700",
     color: Colors.text,
   },
   subtitle: {
@@ -319,15 +331,15 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   clearButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: 6,
     padding: 8,
   },
   clearText: {
     fontSize: 14,
     color: Colors.error,
-    fontWeight: '500',
+    fontWeight: "500",
   },
   listContent: {
     padding: 16,
@@ -344,32 +356,32 @@ const styles = StyleSheet.create({
     width: IMAGE_SIZE,
     height: IMAGE_SIZE,
     borderRadius: 16,
-    overflow: 'hidden',
+    overflow: "hidden",
     backgroundColor: Colors.surface,
     borderWidth: 1,
     borderColor: Colors.border,
   },
   thumbnail: {
-    width: '100%',
-    height: '100%',
+    width: "100%",
+    height: "100%",
   },
   imageOverlay: {
-    position: 'absolute',
+    position: "absolute",
     bottom: 0,
     left: 0,
     right: 0,
     padding: 10,
-    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    backgroundColor: "rgba(0, 0, 0, 0.6)",
   },
   imagePrompt: {
     fontSize: 11,
-    color: '#FFF',
+    color: "#FFF",
     lineHeight: 14,
   },
   emptyState: {
     flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
+    justifyContent: "center",
+    alignItems: "center",
     paddingHorizontal: 40,
   },
   emptyIcon: {
@@ -377,37 +389,37 @@ const styles = StyleSheet.create({
     height: 96,
     borderRadius: 24,
     backgroundColor: Colors.surfaceLight,
-    justifyContent: 'center',
-    alignItems: 'center',
+    justifyContent: "center",
+    alignItems: "center",
     marginBottom: 20,
   },
   emptyTitle: {
     fontSize: 20,
-    fontWeight: '600',
+    fontWeight: "600",
     color: Colors.text,
     marginBottom: 8,
   },
   emptySubtitle: {
     fontSize: 15,
     color: Colors.textSecondary,
-    textAlign: 'center',
+    textAlign: "center",
   },
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.9)',
-    justifyContent: 'flex-end',
+    backgroundColor: "rgba(0, 0, 0, 0.9)",
+    justifyContent: "flex-end",
   },
   modalContent: {
     backgroundColor: Colors.surface,
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     paddingTop: 8,
-    maxHeight: '90%',
+    maxHeight: "90%",
     paddingBottom: 40,
   },
   modalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
+    flexDirection: "row",
+    justifyContent: "flex-end",
     paddingHorizontal: 16,
     paddingVertical: 12,
   },
@@ -416,15 +428,15 @@ const styles = StyleSheet.create({
     height: 40,
     borderRadius: 20,
     backgroundColor: Colors.surfaceLight,
-    justifyContent: 'center',
-    alignItems: 'center',
+    justifyContent: "center",
+    alignItems: "center",
   },
   modalImageContainer: {
     paddingHorizontal: 20,
     marginBottom: 16,
   },
   modalImage: {
-    width: '100%',
+    width: "100%",
     aspectRatio: 1,
     borderRadius: 16,
     backgroundColor: Colors.background,
@@ -436,13 +448,13 @@ const styles = StyleSheet.create({
   modalPrompt: {
     fontSize: 16,
     color: Colors.text,
-    fontStyle: 'italic',
+    fontStyle: "italic",
     lineHeight: 22,
     marginBottom: 12,
   },
   modalMeta: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: 8,
   },
   modalDate: {
@@ -452,29 +464,29 @@ const styles = StyleSheet.create({
   modalSize: {
     fontSize: 13,
     color: Colors.textMuted,
-    marginLeft: 'auto',
+    marginLeft: "auto",
   },
   modalActions: {
-    flexDirection: 'row',
+    flexDirection: "row",
     paddingHorizontal: 20,
     gap: 12,
   },
   modalActionButton: {
     flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
     gap: 8,
     paddingVertical: 14,
     borderRadius: 12,
     backgroundColor: Colors.surfaceLight,
   },
   deleteButton: {
-    backgroundColor: 'rgba(239, 68, 68, 0.15)',
+    backgroundColor: "rgba(239, 68, 68, 0.15)",
   },
   modalActionText: {
     fontSize: 15,
-    fontWeight: '600',
+    fontWeight: "600",
     color: Colors.text,
   },
   deleteText: {
