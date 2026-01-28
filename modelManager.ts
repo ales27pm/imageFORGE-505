@@ -1,9 +1,31 @@
 import { Platform } from "react-native";
 import * as FileSystem from "expo-file-system";
-import { unzip } from "react-native-zip-archive";
 import { getManifestExtra } from "@/utils/manifestExtra";
+import { unzipFileWithFflate } from "@/utils/unzip";
 
 let ExpoStableDiffusion: any;
+type Unzipper = (source: string, destination: string) => Promise<void>;
+let unzipArchive: Unzipper | null = null;
+
+function getUnzipArchive() {
+  if (Platform.OS !== "ios") {
+    return null;
+  }
+  if (!unzipArchive) {
+    try {
+      const { unzip } = require("react-native-zip-archive");
+      unzipArchive = async (source: string, destination: string) => {
+        await unzip(source, destination);
+      };
+    } catch (e) {
+      console.warn(
+        "[modelManager] react-native-zip-archive not available, using JS unzip",
+      );
+      unzipArchive = unzipFileWithFflate;
+    }
+  }
+  return unzipArchive;
+}
 
 function getExpoStableDiffusion() {
   if (Platform.OS !== "ios") {
@@ -55,6 +77,10 @@ async function ensureModelAvailable() {
   const stableDiffusion = getExpoStableDiffusion();
   if (Platform.OS !== "ios" || !stableDiffusion) {
     return;
+  }
+  const unzip = getUnzipArchive();
+  if (!unzip) {
+    throw new Error("[modelManager] Zip archive support not available");
   }
   await FileSystem.makeDirectoryAsync(MODEL_PARENT_DIR, {
     intermediates: true,
