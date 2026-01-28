@@ -6,6 +6,9 @@
     "start": "bunx rork start -p hk6y1mlt7wi1hgrk3azn8 --tunnel",
     "start-web": "bunx rork start -p hk6y1mlt7wi1hgrk3azn8 --web --tunnel",
     "start-web-dev": "DEBUG=expo* bunx rork start -p hk6y1mlt7wi1hgrk3azn8 --web --tunnel",
+    "dev": "bunx serve dist -l 5000 -s --cors",
+    "build:web": "npx expo export --platform web",
+    "serve": "npx serve dist -l 5000",
     "lint": "expo lint"
   },
   "dependencies": {
@@ -44,6 +47,7 @@
     "react-native-svg": "15.12.1",
     "react-native-web": "^0.21.0",
     "react-native-worklets": "0.5.1",
+    "serve": "^14.2.5",
     "zustand": "^5.0.2"
   },
   "devDependencies": {
