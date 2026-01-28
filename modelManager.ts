@@ -6,6 +6,7 @@ import { unzipFileWithFflate } from "@/utils/unzip";
 let ExpoStableDiffusion: any;
 type Unzipper = (source: string, destination: string) => Promise<void>;
 let unzipArchive: Unzipper | null = null;
+let stableDiffusionLoadError: string | null = null;
 
 function getUnzipArchive() {
   if (Platform.OS !== "ios") {
@@ -34,12 +35,27 @@ function getExpoStableDiffusion() {
   if (!ExpoStableDiffusion) {
     try {
       ExpoStableDiffusion = require("expo-stable-diffusion");
+      stableDiffusionLoadError = null;
     } catch (e) {
-      console.warn("[modelManager] expo-stable-diffusion not available");
+      stableDiffusionLoadError =
+        "[modelManager] expo-stable-diffusion not available. " +
+        "Ensure the native module is installed and included in your build.";
+      console.warn(stableDiffusionLoadError);
       return null;
     }
   }
   return ExpoStableDiffusion;
+}
+
+function requireExpoStableDiffusion() {
+  const stableDiffusion = getExpoStableDiffusion();
+  if (!stableDiffusion) {
+    throw new Error(
+      stableDiffusionLoadError ??
+        "[modelManager] expo-stable-diffusion not available.",
+    );
+  }
+  return stableDiffusion;
 }
 
 const MODEL_PARENT_DIR = (FileSystem.documentDirectory || "") + "Model/";
@@ -125,10 +141,10 @@ async function ensureModelAvailable() {
 }
 
 async function initModel() {
-  const stableDiffusion = getExpoStableDiffusion();
-  if (Platform.OS !== "ios" || !stableDiffusion) {
+  if (Platform.OS !== "ios") {
     return;
   }
+  const stableDiffusion = requireExpoStableDiffusion();
   await ensureModelAvailable();
   await stableDiffusion.loadModel(MODEL_DIR);
 }
@@ -161,9 +177,6 @@ export async function generateWithStableDiffusion(args: {
   savePath: string;
 }) {
   await initModelOnce();
-  const stableDiffusion = getExpoStableDiffusion();
-  if (!stableDiffusion) {
-    throw new Error("[modelManager] Stable Diffusion not available");
-  }
+  const stableDiffusion = requireExpoStableDiffusion();
   return stableDiffusion.generateImage(args);
 }
