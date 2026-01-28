@@ -1,0 +1,135 @@
+Integrating Core ML Stable Diffusion into
+imageFORGE-505 (iOS)
+This guide explains how to replace the existing cloud-based image generation in imageFORGE-505 with
+on‑device Stable Diffusion using Apple’s Core ML. It also includes a small bug fix for handling undefined
+Base64 strings.
+1 Prerequisites and model preparation
+1.
+2.
+3.
+iOS deployment: Ensure the app targets iOS 16.2+. In app.json this is already set under
+ios.deploymentTarget.
+Memory entitlement: The com.apple.developer.kernel.increased-memory-limit
+entitlement is enabled in app.json ; keep it.
+Model download: Obtain a Core ML‑converted Stable Diffusion model. Use Apple’s
+ml‑stable‑diffusion conversion script or download a pre‑converted model from Hugging Face (e.g.
+apple/coreml-stable-diffusion-2-1-base ). Copy the model files (for example
+TextEncoder.mlmodelc , UnetChunk*.mlmodelc , VAEDecoder.mlmodelc , vocab.json,
+merges.txt ) into the app’s documents directory at Documents/Model/stable-
+diffusion-2-1/ on the device. During development you can push these files with idb file
+push.
+2 Dependencies
+The project already lists expo-stable-diffusion ^0.2.0 and expo-build-properties in
+package.json . After installing them, run
+npx expo prebuild --platform ios
+npx expo run:ios
+so that Expo installs the native workflow, manually add the entitlements match the above.
+ExpoStableDiffusion StableDiffusion module. If you are not using the Expo managed
+Swift package and ensure the iOS deployment target and
+3 Configuration updates
+Your app.json should already include the necessary plugins and memory entitlement. For example:
+{
+"expo": {
+1
+"ios": {
+"supportsTablet": false,
+"bundleIdentifier": "com.example.app",
+"deploymentTarget": "16.2",
+"entitlements": {
+"com.apple.developer.kernel.increased-memory-limit": true
+}
+},
+"plugins": [
+"expo-font",
+"expo-web-browser"
+["expo-build-properties", { "ios": { "deploymentTarget": "16.2" } }],
+]
+}
+}
+No further changes are required here.
+4 Code changes
+4.1 Fixing the Base64 helper
+Hermès’ atob() implementation throws an error if the input string length isn’t a multiple of four. To avoid
+a crash (“Cannot read property ‘replace’ of undefined”), guard against undefined input and pad Base64
+strings when decoding. Replace the existing helper in contexts/ImageContext.tsx with:
+function base64ToUint8Array(base64?: string): Uint8Array {
+// Return an empty array if no data is provided.
+if (!base64) {
+return new Uint8Array(0);
+}
+// Trim whitespace/newlines
+let clean = base64.replace(/[\r\n\s]+/g,
+'');
+// Hermès requires the length to be a multiple of 4
+const mod = clean.length % 4;
+if (mod === 2) clean += '==';
+else if (mod === 3) clean += '=';
+else if (mod === 1) clean += '===';
+const binary = globalThis.atob(clean);
+const bytes = new Uint8Array(binary.length);
+for (let i = 0; i < binary.length; i++) {
+bytes[i] = binary.charCodeAt(i);
+}
+return bytes;
+}
+2
+4.2 Replacing the network API with on‑device generation
+Open contexts/ImageContext.tsx and make the following high‑level changes:
+1.
+Lazy‑load the module: At the top of the file, after importing expo-file-system , add:
+`ts
+// Lazily require expo-stable-diffusion on iOS
+let ExpoStableDiffusion: any;
+if (Platform.OS === 'ios') {
+try {
+ExpoStableDiffusion = require('expo-stable-diffusion');
+} catch {
+console.warn('[ImageContext] expo-stable-diffusion not available');
+}
+}
+1.
+Define the model directory: Set a constant pointing to the model resources directory:
+const MODEL_DIR = (FileSystem.documentDirectory || '') + 'Model/stable-
+diffusion-2-1/';
+1.
+Adjust the mutation: In the logic that runs only on iOS when mutationFn for image generation, before calling the remote API, add
+ExpoStableDiffusion is available:
+2.
+Create a unique imageId and a savePath ending in .jpeg (not .png ).
+3.
+4.
+5.
+6.
+Call await ExpoStableDiffusion.loadModel(MODEL_DIR); once per session to load the
+Core ML model.
+Call await ExpoStableDiffusion.generateImage({ prompt, stepCount: 25,
+savePath }); to generate the image. You can adjust stepCount for speed vs. quality.
+Read the generated JPEG back to Base64 using FileSystem.readAsStringAsync(savePath,
+{ encoding: 'base64' }).
+Construct result with mimeType: 'image/jpeg' and use localUri = savePath .
+7.
+Fallback: If the module is missing or generation fails, fall back to your existing
+generateImageAPI() call.
+8.
+File format: Save on‑device images with a Continue using .png only for the API fallback.
+.jpeg extension and set the appropriate MIME type.
+9.
+Type: Declare result as | { image: { base64Data: string; mimeType: string };
+size: string } | undefined to satisfy TypeScript when assigning in different branches.
+3
+These changes ensure that, on supported iOS devices, images are generated locally via Core ML, while
+other platforms still use the remote API.
+4.3 Saving and loading images
+The app persists up to ten images in AsyncStorage and stores the corresponding files in the images
+directory. Keep this logic. When restoring files, use the updated base64ToUint8Array() function to
+avoid crashes if the Base64 data is undefined.
+5 Testing and limitations
+• Simulator vs. device: On‑device generation requires a physical iPhone or iPad with an A14 or later chip.
+The iOS simulator does not use the Neural Engine, and generation will be slow or may fail.
+• Aspect ratios: Stable Diffusion models from Apple produce square images (e.g. 512×512). For other
+aspect ratios, generate a square and crop or pad it in the UI.
+• Performance: Generating a 512×512 image with 25 steps can take 8–15 seconds on modern iPhones.
+Consider reducing stepCount for faster results.
+With these modifications, imageFORGE-505 performs image generation entirely on‑device for iOS,
+improving privacy and eliminating network latency. The Base64 helper fix prevents crashes when input is
+undefined.
