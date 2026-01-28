@@ -1,25 +1,25 @@
-import * as FileSystem from "expo-file-system";
+import { Directory, File } from "expo-file-system";
 import { unzipSync } from "fflate";
-import { fromByteArray, toByteArray } from "base64-js";
-
-const base64Encoding = FileSystem.EncodingType.Base64;
 
 async function ensureDirectory(path: string) {
-  await FileSystem.makeDirectoryAsync(path, { intermediates: true });
+  const dir = new Directory(path);
+  await dir.create({ intermediates: true });
+}
+
+async function readBinaryFile(path: string): Promise<Uint8Array> {
+  const file = new File(path);
+  const data = await file.read();
+  return data instanceof Uint8Array ? data : new Uint8Array(data);
 }
 
 async function writeBinaryFile(path: string, data: Uint8Array) {
-  const base64 = fromByteArray(data);
-  await FileSystem.writeAsStringAsync(path, base64, {
-    encoding: base64Encoding,
-  });
+  const file = new File(path);
+  await file.create({ overwrite: true, intermediates: true });
+  await file.write(data);
 }
 
 export async function unzipFileWithFflate(source: string, destination: string) {
-  const base64Zip = await FileSystem.readAsStringAsync(source, {
-    encoding: base64Encoding,
-  });
-  const zipData = toByteArray(base64Zip);
+  const zipData = await readBinaryFile(source);
   const entries = unzipSync(zipData);
 
   await ensureDirectory(destination);

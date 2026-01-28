@@ -1,7 +1,15 @@
 import { Platform } from "react-native";
 import * as FileSystem from "expo-file-system";
+import { Base64 } from "js-base64";
 import { getManifestExtra } from "@/utils/manifestExtra";
 import { unzipFileWithFflate } from "@/utils/unzip";
+
+if (
+  typeof globalThis !== "undefined" &&
+  !(globalThis as { Base64?: typeof Base64 }).Base64
+) {
+  (globalThis as { Base64: typeof Base64 }).Base64 = Base64;
+}
 
 let ExpoStableDiffusion: any;
 type Unzipper = (source: string, destination: string) => Promise<void>;
