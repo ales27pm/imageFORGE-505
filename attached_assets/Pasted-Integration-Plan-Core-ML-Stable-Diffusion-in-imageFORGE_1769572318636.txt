@@ -1,0 +1,198 @@
+Integration Plan: Core ML Stable Diffusion in imageFORGE-505 (iOS)
+
+Overview and Goals
+
+We will replace the current cloud-based image generation in imageFORGE-505 with Apple’s on-device Core ML Stable Diffusion model. This ensures all inference runs locally on iOS devices (iPhone/iPad) using Apple’s Neural Engine, with no external API calls. The key steps include obtaining a Core ML–converted Stable Diffusion model, adding the necessary native module (Apple’s StableDiffusion Swift package via an Expo module), updating iOS project settings (deployment target and memory limits), and modifying the React Native code to load the model and generate images on-device. The result will be an iOS-only implementation where image generation is offline, leveraging Core ML for performance and privacy.
+
+Requirements & Compatibility: This integration targets iOS 16.2+ on devices with Apple Neural Engine (A14 Bionic or later) ￼ ￼. Apple’s Core ML Stable Diffusion is optimized for Apple Silicon and requires these minimum versions. We will enable the “Increased Memory Limit” entitlement to allow the app to use extra RAM, as Stable Diffusion is memory-intensive ￼ ￼. (Note: Devices with 6GB+ RAM – e.g. iPhone 13 Pro/14 – are recommended for full 512×512 image generation; see Lower-End Devices at the end for options.) There are no strict bundle size or performance constraints from our side, so we can include the large model files in the app and accept multi-second generation times on device.
+
+Obtaining and Preparing the Core ML Model
+
+First, we need a Core ML–compatible Stable Diffusion model. There are a few ways to get this:
+	•	Convert from PyTorch: Apple provides a conversion tool in their ml-stable-diffusion repo. You can use the python_coreml_stable_diffusion.torch2coreml script to convert a Hugging Face Stable Diffusion model into Core ML format ￼ ￼. For example, to convert Stable Diffusion 2.1 base with necessary optimizations (chunked U-NET for iOS, etc.), one might run:
+
+python -m python_coreml_stable_diffusion.torch2coreml \
+  --model-version stabilityai/stable-diffusion-2-1-base \
+  --convert-unet --convert-text-encoder --convert-vae-decoder --convert-safety-checker \
+  --chunk-unet --attention-implementation SPLIT_EINSUM_V2 \
+  --compute-unit ALL \
+  --bundle-resources-for-swift-cli \
+  -o models/stable-diffusion-2-1/split_einsum_v2/compiled
+
+This produces a Core ML package in a compiled directory ￼. (Refer to Apple’s guide for details on flags like --chunk-unet required for iOS ￼.)
+
+	•	Download a Pre-Converted Model: Apple has published converted models on Hugging Face. For example, Stable Diffusion 2.1 Base (512×512) is available at apple/coreml-stable-diffusion-2-1-base. To download only the compiled resources (which include the .mlmodelc files), you can use Git LFS or a Python snippet. Andrei Zgîrvaci suggests a script using the HuggingFace Hub API to grab a specific folder (e.g. the compiled resources) instead of the entire repo ￼. Using that approach or Git LFS, you can obtain a folder containing the Core ML model files.
+	•	Use Andrei’s Optimized Model: For convenience, Andrei has provided an already-converted Core ML model (Stable Diffusion 2.1) on his Hugging Face repo, including a direct ZIP download ￼. This model is optimized for iOS 16 devices (using the split_einsum_v2 attention for better performance on Neural Engine). You can download and unzip this model.
+
+After obtaining the model, verify the model files. The Stable Diffusion Core ML resources directory should contain at least: the text tokenizer vocabulary (vocab.json and merges.txt), the TextEncoder model, the UNet (denoiser) model – often split into chunks for iOS, the VAEDecoder (image decoder), and optionally a SafetyChecker model ￼ ￼. For example, you should see files like TextEncoder.mlmodelc, UnetChunk1.mlmodelc, UnetChunk2.mlmodelc (or a single Unet.mlmodelc if not chunked), VAEDecoder.mlmodelc, plus the tokenizer files. Ensure you have the chunked UNet if you plan to run on iPhone/iPad – Apple’s pipeline will look for chunked models first and only fall back to a full UNet if the chunks are not present ￼ ￼.
+
+Directory Structure: Decide on a directory name in the app for the model. In our plan, we’ll use Documents/Model/stable-diffusion-2-1/ (under the app’s Documents directory) to store these files. The exact name isn’t critical as long as we point the code to the correct path containing the resources. (For example, Andrei’s module expects a folder path where the model files reside, and in his blog he uses …/Model/stable-diffusion-2-1 ￼ ￼.)
+
+Project Setup – Dependencies and iOS Configuration
+
+Next, integrate the necessary dependencies into the project:
+	•	Install the Expo Stable Diffusion module: Add Andrei Zgîrvaci’s expo-stable-diffusion package, which wraps Apple’s Core ML StableDiffusion Swift library for React Native. In the project root, run:
+
+npx expo install expo-stable-diffusion
+
+This Expo plugin includes the native Swift module we need (it uses Apple’s StableDiffusionPipeline under the hood) ￼ ￼. It also provides JS/TS interfaces to load the model and generate images. (Note: This package is iOS-only and will not work on Android or web, which is acceptable since we are targeting iOS only ￼ ￼.)
+
+	•	Expo Dev Build: Because this uses a native module, you cannot use Expo Go for development. You’ll need to create a custom iOS development build or run via Xcode. If you’re using Expo, run:
+
+npx expo prebuild --clean --platform ios
+npx expo run:ios
+
+This will generate the iOS native project (if not already done) and install CocoaPods, including our new module. (If the app was pure Expo managed workflow, this “prebuild” step will eject the iOS project. Since imageFORGE-505 already uses some native modules (Expo FileSystem, etc.), it likely has a development workflow for iOS in place.) ￼ Ensure you open the workspace in Xcode and confirm the build succeeds with the new pod. The ExpoStableDiffusion podspec sets iOS deployment target 16.2 and links against ExpoModulesCore and the Swift library.
+
+	•	iOS Deployment Target 16.2: Update the app’s iOS deployment target to 16.2 or higher. With Expo, the easiest way is to use the expo-build-properties config plugin. Install it with:
+
+npx expo install expo-build-properties
+
+Then in app.json (or app.config.js), add:
+
+{
+  "expo": {
+    "plugins": [
+      ["expo-build-properties", { "ios": { "deploymentTarget": "16.2" } }]
+    ]
+  }
+}
+
+This ensures the Xcode project is set to iOS 16.2 minimum ￼. (If not using Expo, set the deployment target in Xcode project settings.) This step is mandatory because the Apple Stable Diffusion Swift package does not support iOS versions below 16.2.
+
+	•	Increased Memory Limit Entitlement: Enable the “com.apple.developer.kernel.increased-memory-limit” entitlement for iOS. This allows the app to use more RAM, which is crucial to avoiding OS kill for large models. In Expo, you can add this in app.json under ios.entitlements:
+
+{
+  "expo": {
+    "ios": {
+      "entitlements": {
+        "com.apple.developer.kernel.increased-memory-limit": true
+      }
+    }
+  }
+}
+
+￼ ￼. After adding this, rebuild the iOS app so that the entitlement is applied in the app’s provisioning profile.
+
+	•	Include the Core ML model resources: Since the model files are large, we need to package them with the app (given no bundle size constraints). There are a couple of approaches:
+a. Bundle in the app: After the Expo prebuild, you can add the model files to the Xcode project. For example, create a folder (e.g. Model or StableDiffusionResources) in the Xcode project’s Resources. Add all the .mlmodelc directories and tokenizer files into this folder. Ensure they are included in the app target so they get copied into the app bundle. With this approach, the model will be inside the app bundle at runtime.
+b. Copy to Documents at runtime: An alternative is to ship the model as an asset or download on first launch, then save it under FileSystem.documentDirectory. For instance, you could include the model as a large asset and on first run copy it into the Documents/Model folder. However, since our scenario has no strict size limits, bundling (a) is simpler and avoids a first-run copy delay.
+In either case, we need the final path of the model directory. If bundled in the app, the path might be something like <AppBundle>/Model/stable-diffusion-2-1. If we choose to bundle, we might need to determine that path. Expo’s FileSystem API does not directly expose the app bundle path, but we can work around it by using NSBundle.mainBundle in native code or by copying files to Documents. To keep things straightforward, we will assume the model files end up in the Documents directory on the device (either by bundling them and copying, or by pre-loading them there for dev/testing). During development, you can manually push the model to the Simulator or device: for example, using Facebook’s idb tool as Andrei suggests: idb file push --udid <device_id> --bundle-id <app.bundle.id> <PathToModelFolder>/Resources/* /Documents/ ￼. This copies all model files into the app’s Documents. For production, bundling and copying programmatically is preferred so that the app “just works” with the model packaged.
+	•	Verify Pod integration: The expo-stable-diffusion package should automatically include Apple’s StableDiffusion Swift Package. (The Expo module’s Swift code calls StableDiffusionPipeline, which is defined in Apple’s library.) If needed, check that the ExpoStableDiffusion pod pulled in the Swift package. In some cases, you might have to add Apple’s Swift package via Xcode (Swift Packages > add https://github.com/apple/ml-stable-diffusion, using version tag e.g. 0.2.0) to the project. However, Andrei’s module likely already has it integrated. The example iOS app by Apple notes that version 0.2.0 of the Swift package is required ￼ ￼, so we should ensure we use a compatible version (the Expo module v0.2.0 corresponds to Apple’s v0.2.0 as of Aug 2023).
+
+Integrating the Model in React Native (Expo Module Usage)
+
+With the native module set up, we can now load the model and generate images from JavaScript/TypeScript. We will use Expo’s FileSystem and the expo-stable-diffusion API for this.
+
+1. Import and Configure Paths: In the context where we handle image generation (likely the ImageContext or a similar service), import the module and define the model path and an output path template. For example:
+
+import * as FileSystem from 'expo-file-system';
+import * as ExpoStableDiffusion from 'expo-stable-diffusion';
+
+const MODEL_DIR = FileSystem.documentDirectory + 'Model/stable-diffusion-2-1/';  // path to model resources
+const IMAGES_DIR = FileSystem.documentDirectory + 'images/';                    // directory for outputs
+
+// Ensure the images directory exists (we'll reuse existing ensureDirExists logic)
+await FileSystem.makeDirectoryAsync(IMAGES_DIR, { intermediates: true });
+
+Here, MODEL_DIR should point to the folder containing *.mlmodelc files and vocab/merges (within the app’s Documents). We reuse the existing images directory (which the app already sets up via ensureDirExists()) for saving generated images. The above uses Expo FileSystem to create the directory if not present ￼.
+
+2. Loading the Core ML Model: Before generating images, the Core ML models must be loaded into memory. This can be done once (e.g. at app startup or when the user first attempts generation). Using the module:
+
+await ExpoStableDiffusion.loadModel(MODEL_DIR);
+console.log('Stable Diffusion model loaded.');
+
+This call will initialize the StableDiffusionPipeline with our model resources at the given path ￼ ￼. Internally, it sets computeUnits to .cpuAndNeuralEngine (using both CPU and Neural Engine) and reduceMemory to true for iOS ￼ ￼. The reduceMemory flag is important on iOS to avoid memory pressure by lazily loading model data and unloading some weights – this is recommended by Apple for iOS devices ￼ ￼. Loading the model may take a few seconds (on first load, Core ML may compile the model; subsequent loads are faster due to caching) ￼. It’s best to call this on a background thread or during an initialization phase with a loading indicator.
+
+In our React context, we might call loadModel inside a useEffect when the app mounts, or trigger it on the first call to generate. For example, we can modify the ImageProvider so that when generateImage() is invoked the first time, it ensures loadModel has been awaited. Optionally, we could expose a separate function to load/unload the model (the expo module provides unloadModel as well, which frees memory if needed) ￼.
+
+3. Replacing the Generate Function: The existing generateImageAPI(prompt, size) (which calls the remote API) will be replaced with a local generation function. We integrate it into the generateImage mutation. In pseudo-code:
+
+generateImage: async (prompt: string) => {
+  const size = ASPECT_RATIO_MAP[selectedAspectRatio];  // e.g. "1024x1024" (currently unused directly in model)
+  console.log('Generating image for prompt:', prompt);
+
+  // 3a. Ensure model is loaded (if not loaded globally)
+  if (!modelLoaded) {
+    await ExpoStableDiffusion.loadModel(MODEL_DIR);
+    modelLoaded = true;
+  }
+
+  // 3b. Prepare a unique filename for output
+  const imageId = `img_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  const savePath = `${IMAGES_DIR}${imageId}.jpeg`;  // using JPEG as output format
+
+  // 3c. Run the Stable Diffusion generation
+  await ExpoStableDiffusion.generateImage({
+    prompt: prompt,
+    stepCount: 25,            // number of inference steps (tweakable)
+    savePath: savePath
+  });
+  console.log('Image generated at path:', savePath);
+
+  // 3d. (Optional) Read file and convert to base64 if needed
+  let base64Data: string | undefined = undefined;
+  try {
+    base64Data = await FileSystem.readAsStringAsync(savePath, { encoding: FileSystem.EncodingType.Base64 });
+  } catch (e) {
+    console.warn('Could not read file as base64:', e);
+  }
+
+  // 3e. Construct the GeneratedImage object
+  const newImage: GeneratedImage = {
+    id: imageId,
+    prompt: prompt,
+    uri: savePath,
+    base64Data: base64Data,            // might omit this to save memory
+    mimeType: 'image/jpeg',
+    size: size,
+    createdAt: Date.now()
+  };
+
+  // 3f. Save to state/storage (similar to existing logic)
+  // ... prepend to images list, enforce max list length, AsyncStorage etc.
+  return newImage;
+}
+
+This outline shows how we utilize ExpoStableDiffusion.generateImage. We specify the prompt and a stepCount (we can use a default like 20–25 steps for good quality). We also give a savePath – the module will save the resulting image to this path on disk ￼ ￼. In our case, we generate a unique filename for each image (to allow multiple saved images, rather than overwriting a single file).
+
+After generation, the image is already written as a JPEG file at savePath. The expo module writes a JPEG with quality 1.0 (100%) ￼ ￼. We set mimeType accordingly to "image/jpeg" (note: the previous implementation assumed PNG; now we’ll be dealing with JPEG data). We can optionally load the file and store a Base64 string if we still want to keep that in state. The current app stored Base64 data for persistence and for web usage. If we are focusing on iOS only, we might not need to keep Base64 in AsyncStorage – we could rely on the file system and just store the URI (since the images persist in the app’s documents folder). However, the existing logic to cap stored images at 10 and to restore missing files from Base64 can remain for safety. The base64 conversion does add overhead (memory and time), so it’s something to consider – but given imageFORGE already handles it and size constraints are not a concern, it’s fine to preserve it for now.
+
+Finally, we update the state: adding the new GeneratedImage to our images list (ensuring we don’t exceed MAX_STORED_IMAGES, and saving the list to AsyncStorage as before). This mirrors the existing flow, except now base64Data and uri are coming from local generation instead of a network response.
+
+Progress Updates (UI Integration): The generation process can take a while (several seconds), so it’s good to inform the user. The app already uses an isGenerating flag and a loading animation when generation is in progress. We will ensure to set this flag while generateImage is running (e.g. the React Query mutation isPending does this already). We can enhance this by hooking into Stable Diffusion’s step-by-step progress. The expo-stable-diffusion module emits an event for each diffusion step. We can subscribe via:
+
+const sub = ExpoStableDiffusion.addStepListener(({ step }) => {
+  console.log(`Current diffusion step: ${step}`);
+  // We could update some progress state if needed
+});
+...
+// After generation completes:
+sub.remove();
+
+This event will fire with step values from 0 up to stepCount-1 ￼ ￼. In Andrei’s example, they use this to display a percentage or step counter in the UI. We can consider updating our UI (for example, showing “X% done” or a progress bar) as a further enhancement. At minimum, our isGenerating will keep the UI’s “Generate” button disabled and show a spinner as it does now.
+
+Prompt Handling: We will pass the user’s text prompt directly into the model. The current UI binds a prompt string and we call generateImage(prompt.trim()). There is no special preprocessing needed – the Core ML pipeline includes a tokenizer that will convert the prompt into text embeddings internally. We should continue to trim whitespace and possibly enforce the existing character limit (500 chars) to avoid extremely long prompts. (Note: The Core ML model uses a fixed token sequence length of 77 tokens; any prompt beyond that will be truncated by the tokenizer, so keeping prompts reasonably sized is fine ￼.) If we needed to support negative prompts or other conditioning (like guidance scale, seeds, etc.), the Apple StableDiffusionPipeline.Configuration supports them ￼ ￼. However, the Expo module currently doesn’t expose negative prompts or guidance scale as parameters. By default it uses classifier-free guidance with a standard scale (likely 7.5) and no negative prompt (equivalent to an empty negative prompt). This should be acceptable for now, as the previous implementation also didn’t have a negative prompt feature. If needed in the future, we could extend the native module to accept a negative prompt string and set configuration.negativePrompt accordingly ￼ ￼.
+
+One more consideration: the current expo module disables the built-in safety checker by default (we saw disableSafety: true in the native code ￼ ￼). This means NSFW content won’t be filtered out. The original API call might have had its own safety filter; if we need similar filtering, we could re-enable the safety model. That would involve including SafetyChecker.mlmodelc in the model directory and modifying the native module to set disableSafety: false. Given performance and memory constraints, many apps choose to leave it off and possibly handle moderation separately. We’ll proceed with it off (per the default) but be aware of this aspect.
+
+React Native UI and Storage Changes
+
+Most of the UI in imageFORGE-505 can remain the same, since we’re still returning a GeneratedImage object with an image URI and optional base64. The app uses expo-image or Image to display the result. Now, because we provide a local file URI (file:///.../Documents/images/img_xxx.jpeg), the image component can load it directly. In the GenerateScreen, the logic that sets imageSource will find lastGeneratedImage.uri and use that to render the  ￼ ￼. This is exactly what we want – previously, the code was already preferring a file URI (and falling back to a data URL if no URI). Since we will always have a file URI (on iOS), the image should display quickly from the file system.
+
+We should, however, update a few minor things:
+	•	Image format handling: The app assumed PNG images (it even defaulted mimeType to 'image/png' if not set ￼). Now we are saving JPEGs. We will set mimeType: 'image/jpeg' in the GeneratedImage. Also, when constructing a data URI for base64 (if used), ensure to use the correct mime type (data:image/jpeg;base64,...). The UI code already uses lastGeneratedImage.mimeType for the data URI if present ￼ ￼, so as long as we store 'image/jpeg' there, it will be correct.
+	•	Image dimensions / Aspect Ratio: The current app allows choosing aspect ratios (Square 1:1, Wide 16:9, Tall 9:16) and passes a size string (like “1024x1024”, “1792x1024”) to the backend ￼ ￼. With the Core ML pipeline, generating non-square images is not straightforward. Apple’s Stable Diffusion models are typically trained for a specific resolution (512x512 or 768x768). The pipeline’s targetSize parameter is a single value (for square output) ￼, and producing rectangular images may require additional technique (like using originalSize and cropSize for image-to-image tasks, or fine-tuned models). In the initial integration, it is safest to generate square images (e.g. 512x512 or 768x768) until we verify support for arbitrary aspect ratios. We can handle the user’s aspect ratio selection in a couple of ways:
+	•	One approach is to ignore the aspect ratio for generation (always generate, say, 512x512), then post-process the output image (crop or pad) to the requested aspect. For example, to get a 16:9 (1792x1024) image, generate 1024x1024 and then crop the top and bottom to 16:9. This however throws away some content and might not look ideal. Alternatively, generate a larger square (e.g. 1792x1792) and then crop to 1792x1024 – but a 1792x1792 generation is 3.2MP, which might be too heavy for device (likely to exceed memory on most iPhones).
+	•	A better approach might be to use a diffusers trick: supply the Stable Diffusion pipeline with a wider “latent” size. Apple’s pipeline doesn’t directly expose width and height, but if we had a model converted for 768x768, one could potentially generate and then resize. Given the complexity, for now we will limit generation to 512x512 (or 768x768 if using SD 2.1 768 model). We can still allow the user to select aspect ratios, but perhaps document that the output will be center-cropped or scaled. If high resolution is a priority, another idea is to run an upscaling model (not covered here) or simply scale the 512px image up to 1024px – since we’re not constrained by performance, scaling is fine, though it won’t add detail.
+In summary, initially generate square images (the model’s native resolution) and adjust the aspect ratio feature accordingly. This could mean: if user selects 16:9 or 9:16, we still produce a 512x512 image and then present it in the chosen aspect ratio container (possibly with blank space or a simple center-crop). Another option is to find a Core ML model of Stable Diffusion that is trained for 768 or higher resolution to better satisfy the 1024px outputs. Stable Diffusion 2.1 has a 768 model (stabilityai/stable-diffusion-2-1) which could be converted and might produce 768x768 images that we can crop to 768x432 (for 16:9) or 432x768 (for 9:16) with less loss. This is a potential improvement for later.
+	•	Removal of network code: The fetch call to toolkit.rork.com and the dependency on @rork-ai/toolkit-sdk can be removed. After integration, no API calls are needed for generation. All images generate offline. We should update any error handling or messaging accordingly (e.g., if generation fails, it’s likely due to model issues or memory, rather than a network error). Ensure to test the failure case: if the model isn’t loaded or runs OOM, the module might throw an error – our generateImage mutation should catch and handle it (the current code already wraps the mutation call in a try/catch with user feedback vibration and console error ￼).
+	•	Persistence: The app’s existing logic for storing and loading generated images from disk should continue to work. It stores up to 10 images in AsyncStorage (with their metadata and base64) and keeps the image files in the images directory. We will follow the same pattern. Our integration ensures images are saved to that directory, and we reuse ensureDirExists() so it’s created beforehand ￼ ￼. On app launch, the context’s useQuery will scan the images directory and AsyncStorage to load the thumbnail list ￼ ￼. We should verify that JPEG files are handled – e.g., the code currently expects .png extension when reconstructing filenames ￼ ￼. Since we are now using .jpeg, we might adjust that part to use .jpeg extensions (or we could still save with a .png suffix but containing JPEG data – not ideal). It’s better to use the correct extension for clarity. So, update const filename = \${img.id}.png`to.jpegwhen saving and when later restoring. Similarly, when deleting images, ensure we delete the.jpeg` file. These are small tweaks to align with the new format.
+
+Best Practices and Additional Considerations
+	•	Performance Expectations: On modern iPhones (A15/A16 chips), generating a 512×512 image with ~20 steps can take on the order of 8–15 seconds ￼. The first run may be slower due to model loading and compilation. Using the .cpuAndNeuralEngine compute units means the Neural Engine will accelerate the neural network operations. We should keep stepCount reasonable (e.g., 20–30) to balance quality and speed. In the UI, set user expectations by showing a spinner/progress (“generating…”) as we already do. If needed, we can experiment with faster schedulers or fewer steps for preview purposes. Apple’s default in the Swift pipeline is a DPM-Solver sampler which is already quite fast per step ￼.
+	•	Memory Usage: With the increased memory entitlement, the app can use > 3 GB of RAM if available. Still, be mindful that older devices (e.g., iPhone 12/12 Mini with 4GB RAM) might struggle. Apple recently introduced quantized models (e.g., 8-bit or 6-bit weights) that drastically reduce memory footprint, enabling generation on devices like iPhone 12 Mini (with iOS 17) in ~20 seconds ￼ ￼. If supporting such devices is a goal, consider using a quantized Core ML model variant. For instance, Stable Diffusion 1.5 8-bit quantized models exist and Apple’s repo supports converting to lower precision. That could be a future enhancement – the integration steps remain similar, just pointing to a different model directory (and requiring iOS 17+ for 8-bit execution).
+	•	Testing and Debugging: Once integrated, test on a simulator and a physical device. On the simulator, you can load the model by pointing to a path on your Mac (the expo module allows using a local path on simulator, though it won’t use Neural Engine on simulator) ￼. On device, ensure the model is properly found in Documents or bundle. If ExpoStableDiffusion.loadModel throws an error, it might be because it can’t find the files – double-check the path and that files are there. Also watch Xcode logs for memory warnings. If generation consistently fails with a memory error, try reducing stepCount or ensure the model is chunked and reduceMemory=true (which we have by default). The Apple repo’s FAQ mentions that .mlmodelc files (compiled models) load faster than .mlpackage – our approach uses compiled models, so we benefit from faster subsequent loads ￼.
+	•	Cleanup: Remove any now-unused code and packages. The @rork-ai/toolkit-sdk can likely be removed from package.json if it was only for generation. The generateImageAPI function and related console logs can be deleted. We might keep some of the AsyncStorage logic for image history, as that is still useful. Also update documentation/comments to reflect that generation is offline via Core ML. This is a big selling point: “All image generation is done on-device with Core ML (no internet required).” It might be worth highlighting in the app’s UI or README.
+
+By following this plan, imageFORGE-505 will leverage Apple’s latest Core ML Stable Diffusion technology, providing a seamless (albeit device-limited) AI image generation experience. Users on supported iPhones/iPads will be able to generate art from text entirely on their device, aligning with best practices for privacy and possibly performance (Neural Engine is quite fast for this task ￼). We used guidance from Apple’s official repo and Andrei Zgîrvaci’s examples to ensure a smooth integration, including the necessary iOS project settings and model handling procedures.

@@ -5,9 +5,20 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Platform } from 'react-native';
 import { GeneratedImage, AspectRatio, ASPECT_RATIO_MAP } from '@/types/image';
 import { File, Directory, Paths } from 'expo-file-system';
+import * as FileSystem from 'expo-file-system';
+
+let ExpoStableDiffusion: any;
+if (Platform.OS === 'ios') {
+  try {
+    ExpoStableDiffusion = require('expo-stable-diffusion');
+  } catch (e) {
+    console.warn('[ImageContext] expo-stable-diffusion not available');
+  }
+}
 
 const STORAGE_KEY = 'ai_forge_images';
 const MAX_STORED_IMAGES = 10;
+const MODEL_DIR = FileSystem.documentDirectory + 'Model/stable-diffusion-2-1/';
 
 const imagesDir = Platform.OS !== 'web' ? new Directory(Paths.document, 'images') : null;
 
@@ -172,7 +183,43 @@ export const [ImageProvider, useImages] = createContextHook(() => {
   const generateMutation = useMutation({
     mutationFn: async (prompt: string) => {
       const size = ASPECT_RATIO_MAP[selectedAspectRatio];
-      const result = await generateImageAPI(prompt, size);
+      
+      let result: { image: { base64Data: string; mimeType: string }; size: string };
+      let localUri = '';
+
+      if (Platform.OS === 'ios' && ExpoStableDiffusion) {
+        console.log('[ImageContext] Generating image locally with Core ML');
+        await ensureDirExists();
+        
+        const imageId = `img_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        const savePath = `${imagesDir?.uri}${imageId}.jpeg`;
+
+        try {
+          // Check if model is loaded - assuming a global state or let the module handle it
+          await ExpoStableDiffusion.loadModel(MODEL_DIR);
+          await ExpoStableDiffusion.generateImage({
+            prompt: prompt,
+            stepCount: 25,
+            savePath: savePath
+          });
+          
+          localUri = savePath;
+          const base64Data = await FileSystem.readAsStringAsync(savePath, { encoding: FileSystem.EncodingType.Base64 });
+          
+          result = {
+            image: {
+              base64Data,
+              mimeType: 'image/jpeg'
+            },
+            size
+          };
+        } catch (error) {
+          console.error('[ImageContext] Local generation failed, falling back to API:', error);
+          result = await generateImageAPI(prompt, size);
+        }
+      } else {
+        result = await generateImageAPI(prompt, size);
+      }
       
       await ensureDirExists();
 
@@ -180,13 +227,13 @@ export const [ImageProvider, useImages] = createContextHook(() => {
         id: `img_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
         prompt,
         base64Data: result.image.base64Data,
-        uri: '', 
+        uri: localUri, 
         mimeType: result.image.mimeType,
         size: result.size,
         createdAt: Date.now(),
       };
 
-      if (Platform.OS !== 'web' && imagesDir) {
+      if (!localUri && Platform.OS !== 'web' && imagesDir) {
         const filename = `${newImage.id}.png`;
         const file = new File(imagesDir, filename);
         
