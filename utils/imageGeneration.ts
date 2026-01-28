@@ -1,5 +1,8 @@
 import * as FileSystem from "expo-file-system";
-import { loadModelOnce, ExpoStableDiffusion } from "@/modelManager";
+import {
+  generateWithStableDiffusion,
+  isLocalGenerationAvailable,
+} from "@/modelManager";
 
 export type GeneratedPayload = {
   image: { base64Data: string; mimeType: string };
@@ -11,8 +14,6 @@ async function generateImageAPI(
   prompt: string,
   size: string,
 ): Promise<GeneratedPayload> {
-  console.log("[imageGeneration] Generating image with prompt:", prompt);
-
   const response = await fetch("https://toolkit.rork.com/images/generate/", {
     method: "POST",
     headers: {
@@ -63,8 +64,10 @@ export async function generateLocally(
   size: string,
   savePath: string,
 ): Promise<GeneratedPayload> {
-  await loadModelOnce();
-  await ExpoStableDiffusion.generateImage({
+  if (!isLocalGenerationAvailable()) {
+    throw new Error("[imageGeneration] Stable Diffusion not available");
+  }
+  await generateWithStableDiffusion({
     prompt,
     stepCount: 25,
     savePath,

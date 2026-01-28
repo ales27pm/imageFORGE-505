@@ -17,7 +17,7 @@ import {
   generateViaApi,
   GeneratedPayload,
 } from "@/utils/imageGeneration";
-import { ExpoStableDiffusion } from "@/modelManager";
+import { isLocalGenerationAvailable } from "@/modelManager";
 
 const STORAGE_KEY = "ai_forge_images";
 const MAX_STORED_IMAGES = 10;
@@ -65,7 +65,7 @@ export const [ImageProvider, useImages] = createContextHook(() => {
       const imageId = `img_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
       let payload: GeneratedPayload;
 
-      if (Platform.OS === "ios" && ExpoStableDiffusion) {
+      if (Platform.OS === "ios" && isLocalGenerationAvailable()) {
         console.log("[ImageContext] Generating image locally with Core ML");
         await ensureImagesDirExists(imagesDir);
         const savePath = buildImagePath(

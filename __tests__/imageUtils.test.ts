@@ -23,6 +23,11 @@ describe("image utils", () => {
     expect(getImageExtension()).toBe("png");
   });
 
+  it("handles malformed mime types defensively", () => {
+    expect(getImageExtension(123 as unknown as string)).toBe("png");
+    expect(getImageExtension({} as unknown as string)).toBe("png");
+  });
+
   it("returns extensions for additional mime types", () => {
     expect(getImageExtension("image/webp")).toBe("webp");
     expect(getImageExtension("image/gif")).toBe("gif");

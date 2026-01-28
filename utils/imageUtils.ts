@@ -1,5 +1,8 @@
 export function getImageExtension(mimeType?: string) {
-  const normalized = mimeType?.split(";")[0]?.trim().toLowerCase();
+  if (typeof mimeType !== "string") {
+    return "png";
+  }
+  const normalized = mimeType.split(";")[0]?.trim().toLowerCase();
   if (normalized === "image/jpeg" || normalized === "image/jpg") {
     return "jpeg";
   }
