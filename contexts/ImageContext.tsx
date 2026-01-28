@@ -5,17 +5,26 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Platform } from 'react-native';
 import { GeneratedImage, AspectRatio, ASPECT_RATIO_MAP } from '@/types/image';
 import { File, Directory, Paths } from 'expo-file-system';
-import * as FileSystemLegacy from 'expo-file-system/legacy';
 
 const STORAGE_KEY = 'ai_forge_images';
 const MAX_STORED_IMAGES = 10;
 
 const imagesDir = Platform.OS !== 'web' ? new Directory(Paths.document, 'images') : null;
 
+function base64ToUint8Array(base64: string): Uint8Array {
+  const binaryString = globalThis.atob(base64);
+  const len = binaryString.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i++) {
+    bytes[i] = binaryString.charCodeAt(i);
+  }
+  return bytes;
+}
+
 async function ensureDirExists() {
   if (Platform.OS === 'web' || !imagesDir) return;
   try {
-    imagesDir.create({ intermediates: true, idempotent: true });
+    await imagesDir.create({ intermediates: true });
   } catch (err) {
     console.warn('[ImageContext] Failed to create images directory:', err);
   }
@@ -89,7 +98,7 @@ export const [ImageProvider, useImages] = createContextHook(() => {
       let existingFiles: string[] = [];
       try {
         if (imagesDir) {
-          const contents = imagesDir.list();
+          const contents = await imagesDir.list();
           existingFiles = contents
             .filter((item): item is File => !(item instanceof Directory))
             .map((fileItem) => {
@@ -117,10 +126,9 @@ export const [ImageProvider, useImages] = createContextHook(() => {
           if (img.base64Data && img.base64Data.length > 100 && file) {
             try {
               console.log('[ImageContext] Restoring file from base64 for:', img.id);
-              file.create({ overwrite: true, intermediates: true });
-              await FileSystemLegacy.writeAsStringAsync(file.uri, img.base64Data, {
-                encoding: FileSystemLegacy.EncodingType.Base64,
-              });
+              await file.create({ overwrite: true, intermediates: true });
+              const bytes = base64ToUint8Array(img.base64Data);
+              await file.write(bytes);
               img.uri = file.uri;
             } catch (err) {
               console.error('[ImageContext] Failed to restore file:', err);
@@ -171,17 +179,17 @@ export const [ImageProvider, useImages] = createContextHook(() => {
         const file = new File(imagesDir, filename);
         
         try {
-          file.create({ overwrite: true, intermediates: true });
-          await FileSystemLegacy.writeAsStringAsync(file.uri, result.image.base64Data, {
-            encoding: FileSystemLegacy.EncodingType.Base64,
-          });
+          await file.create({ overwrite: true, intermediates: true });
+          const bytes = base64ToUint8Array(result.image.base64Data);
+          await file.write(bytes);
           
-          const fileInfo = file.info();
+          const fileExists = file.exists;
+          const fileSize = file.size;
           
-          if (fileInfo.exists) {
-            console.log('[ImageContext] Saved image to:', file.uri, 'size:', fileInfo.size);
+          if (fileExists) {
+            console.log('[ImageContext] Saved image to:', file.uri, 'size:', fileSize);
             
-            if (fileInfo.size != null && fileInfo.size < 100) {
+            if (fileSize != null && fileSize < 100) {
               console.error('[ImageContext] File write appeared to succeed but file is missing or empty');
             }
           } else {

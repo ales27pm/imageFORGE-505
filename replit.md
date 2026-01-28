@@ -39,6 +39,12 @@ The app is configured to run as a static web build served on port 5000.
 The app is configured for static deployment. The `dist/` folder contains the production build.
 
 ## Recent Changes
+- 2026-01-28: Fixed Expo FileSystem API migration
+  - Migrated from deprecated `expo-file-system/legacy` to modern Expo FileSystem API
+  - Added `base64ToUint8Array` helper to convert base64 to binary Uint8Array
+  - Updated file writes to use `file.create()` + `file.write(bytes)` pattern
+  - Fixed async directory operations with proper await calls
+  - Fixed blank image problem in Gallery and Generate screens
 - 2026-01-28: Initial setup for Replit environment
   - Configured static web export and serve workflow
   - Set up port 5000 for web preview

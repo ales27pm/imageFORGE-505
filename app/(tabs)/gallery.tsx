@@ -16,11 +16,20 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Trash2, X, ImageIcon, Clock, Share2 } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import { File, Paths } from 'expo-file-system';
-import * as FileSystemLegacy from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 import Colors from '@/constants/colors';
 import { useImages } from '@/contexts/ImageContext';
 import { GeneratedImage } from '@/types/image';
+
+function base64ToUint8Array(base64: string): Uint8Array {
+  const binaryString = globalThis.atob(base64);
+  const len = binaryString.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i++) {
+    bytes[i] = binaryString.charCodeAt(i);
+  }
+  return bytes;
+}
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const IMAGE_SIZE = (SCREEN_WIDTH - 52) / 2;
@@ -98,10 +107,9 @@ export default function GalleryScreen() {
         
         try {
           const tempFile = new File(Paths.cache, `share_${image.id}.png`);
-          tempFile.create({ overwrite: true, intermediates: true });
-          await FileSystemLegacy.writeAsStringAsync(tempFile.uri, image.base64Data, {
-            encoding: FileSystemLegacy.EncodingType.Base64,
-          });
+          await tempFile.create({ overwrite: true, intermediates: true });
+          const bytes = base64ToUint8Array(image.base64Data);
+          await tempFile.write(bytes);
           fileUri = tempFile.uri;
         } catch (e) {
           console.error('[GalleryScreen] Failed to write share file:', e);

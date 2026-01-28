@@ -1,0 +1,35 @@
+It looks like the move to the modern Expo FileSystem API was only partly complete.  In the current code the app still writes the AI‑generated image files using the deprecated `writeAsStringAsync` API, and it doesn’t fully take advantage of the object‑based methods.  The new API expects binary data (a `Uint8Array`) for file writes and uses asynchronous methods for directory and file creation/listing.  Because of this mismatch the images are saved incorrectly and `RNImage` renders a blank placeholder instead of the generated picture.
+
+The following changes will fix the blank‑image problem:
+
+1. **Add a helper to convert base64→bytes** – The new API’s `File.write()` method accepts either a plain string (for text) or a `Uint8Array` of bytes.  To save image data, decode the base64 string into a byte array before writing it:
+
+   ```ts
+   function base64ToUint8Array(base64: string): Uint8Array {
+     const binaryString = globalThis.atob(base64);
+     const len = binaryString.length;
+     const bytes = new Uint8Array(len);
+     for (let i = 0; i < len; i++) {
+       bytes[i] = binaryString.charCodeAt(i);
+     }
+     return bytes;
+   }
+   ```
+
+2. **Ensure directories and files are created asynchronously** – The `Directory.create()` and `File.create()` methods return promises; awaiting them guarantees the directory/file exists before performing other operations.  This prevents `Directory.list()` or `File.write()` from throwing if the path isn’t ready.
+
+3. **List directory contents via the new API** – `Directory.list()` now returns an array of `File`/`Directory` objects, not just strings.  Use `await imagesDir.list()` and extract file names from the returned objects’ `name` property.
+
+4. **Write images using `File.write()`** – Replace calls to `FileSystemLegacy.writeAsStringAsync` with the new API:
+
+   ```ts
+   await file.create({ overwrite: true, intermediates: true });
+   const bytes = base64ToUint8Array(img.base64Data);
+   await file.write(bytes);
+   ```
+
+   After writing, use the file’s `exists`/`size` properties to check that it was saved correctly, rather than calling the deprecated `getInfoAsync()`.
+
+5. **Update the gallery’s sharing logic** – When preparing a temporary file for sharing, decode the base64 string and call `await tempFile.write(bytes)` instead of `writeAsStringAsync`.
+
+Applying these changes in both `ImageContext.tsx` and `GalleryScreen.tsx` removes the reliance on deprecated functions, ensures the directory and files exist before use, and writes the generated image as true binary data.  Once updated, the `lastGeneratedImage` objects will have a valid `uri` pointing to a real image file, and both the live preview on the Generate screen and the thumbnails in the Gallery will display correctly rather than showing a blank rectangle.
