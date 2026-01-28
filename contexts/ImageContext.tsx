@@ -18,7 +18,7 @@ if (Platform.OS === 'ios') {
 
 const STORAGE_KEY = 'ai_forge_images';
 const MAX_STORED_IMAGES = 10;
-const MODEL_DIR = FileSystem.documentDirectory + 'Model/stable-diffusion-2-1/';
+const MODEL_DIR = (FileSystem.documentDirectory || '') + 'Model/stable-diffusion-2-1/';
 
 const imagesDir = Platform.OS !== 'web' ? new Directory(Paths.document, 'images') : null;
 
@@ -204,7 +204,7 @@ export const [ImageProvider, useImages] = createContextHook(() => {
           });
           
           localUri = savePath;
-          const base64Data = await FileSystem.readAsStringAsync(savePath, { encoding: FileSystem.EncodingType.Base64 });
+          const base64Data = await FileSystem.readAsStringAsync(savePath, { encoding: 'base64' as any });
           
           result = {
             image: {
