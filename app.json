@@ -1,7 +1,7 @@
 {
   "expo": {
-    "name": "AIImageForge",
-    "slug": "aiimageforge",
+    "name": "imageFORGE",
+    "slug": "imageforge",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
@@ -15,14 +15,14 @@
     },
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "app.rork.aiimageforge"
+      "bundleIdentifier": "com.27pm.imageforge"
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#ffffff"
       },
-      "package": "app.rork.aiimageforge",
+      "package": "com.27pm.imageforge",
       "permissions": [
         "android.permission.VIBRATE",
         "READ_EXTERNAL_STORAGE",
