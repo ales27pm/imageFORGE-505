@@ -9,7 +9,8 @@
     "dev": "bunx serve dist -l 5000 -s --cors",
     "build:web": "npx expo export --platform web",
     "serve": "npx serve dist -l 5000",
-    "lint": "expo lint"
+    "lint": "expo lint",
+    "test": "jest"
   },
   "dependencies": {
     "@expo/vector-icons": "^15.0.3",
@@ -49,15 +50,19 @@
     "react-native-svg": "15.12.1",
     "react-native-web": "^0.21.0",
     "react-native-worklets": "0.5.1",
+    "react-native-zip-archive": "^6.0.0",
     "serve": "^14.2.5",
     "zustand": "^5.0.2"
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",
     "@expo/ngrok": "^4.1.0",
+    "@types/jest": "^29.5.12",
     "@types/react": "~19.1.10",
     "eslint": "^9.31.0",
     "eslint-config-expo": "~10.0.0",
+    "jest": "^29.7.0",
+    "jest-expo": "^54.0.4",
     "typescript": "~5.9.2"
   },
   "private": true
