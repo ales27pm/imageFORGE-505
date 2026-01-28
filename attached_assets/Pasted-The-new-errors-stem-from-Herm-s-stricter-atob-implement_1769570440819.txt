@@ -1,0 +1,36 @@
+The new errors stem from Hermès’ stricter `atob()` implementation: unlike browsers or Node.js, Hermès will throw an “Error: Not a valid base64 encoded string length” when the input is missing the required `=` padding.  The Expo docs and Hermès issue tracker highlight that it’s common to trim trailing `=` characters from data URLs, but Hermès’ `atob()` insists on base‑64 strings whose length is a multiple of four.  Consequently, image generation and saving fail whenever the AI provider returns a base‑64 string without proper padding.
+
+### Why the bug occurs
+
+1. **Sanitized base64 isn’t always padded** – The code already strips whitespace and data-URL prefixes before decoding.  Some providers trim trailing `=` padding, leaving a length of e.g. 101 bytes instead of a multiple of four.  Hermès’ `atob()` then rejects it with the “not a valid base64 encoded string length” exception.
+2. **Using `atob()` directly** – The helper function `base64ToUint8Array()` calls `globalThis.atob()` without ensuring padding.  This is fine in browsers (which tolerate missing padding) but fails on Hermès due to the issue above.
+
+### How to fix it
+
+Pad the base‑64 string to a valid length before decoding.  A simple helper can check the remainder of `clean.length % 4` and add the appropriate number of `=` characters.  Here’s an updated `base64ToUint8Array()` that does this:
+
+```ts
+function base64ToUint8Array(base64: string): Uint8Array {
+  // Trim whitespace/newlines (we already remove data URL prefixes upstream)
+  let clean = base64.replace(/[\r\n\s]+/g, '');
+  // Hermès atob requires the length to be a multiple of 4
+  const remainder = clean.length % 4;
+  if (remainder === 2) {
+    clean += '==';
+  } else if (remainder === 3) {
+    clean += '=';
+  } else if (remainder === 1) {
+    // Rare case: add three '='
+    clean += '===';
+  }
+  const binaryString = globalThis.atob(clean);
+  const len = binaryString.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i++) {
+    bytes[i] = binaryString.charCodeAt(i);
+  }
+  return bytes;
+}
+```
+
+This function ensures the base‑64 string always has the correct padding before decoding.  Since Hermès’ strict `atob()` throws only on unpadded data, this change prevents the “not a valid base64 encoded string length” errors seen in your logs.  Once you replace the existing `base64ToUint8Array()` in `contexts/ImageContext.tsx` with the version above and redeploy, your generated images should save and display correctly.

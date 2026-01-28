@@ -12,7 +12,19 @@ const MAX_STORED_IMAGES = 10;
 const imagesDir = Platform.OS !== 'web' ? new Directory(Paths.document, 'images') : null;
 
 function base64ToUint8Array(base64: string): Uint8Array {
-  const binaryString = globalThis.atob(base64);
+  // Trim whitespace/newlines (we already remove data URL prefixes upstream)
+  let clean = base64.replace(/[\r\n\s]+/g, '');
+  // Hermès atob requires the length to be a multiple of 4
+  const remainder = clean.length % 4;
+  if (remainder === 2) {
+    clean += '==';
+  } else if (remainder === 3) {
+    clean += '=';
+  } else if (remainder === 1) {
+    // Rare case: add three '='
+    clean += '===';
+  }
+  const binaryString = globalThis.atob(clean);
   const len = binaryString.length;
   const bytes = new Uint8Array(len);
   for (let i = 0; i < len; i++) {
