@@ -35,8 +35,14 @@ jobs:
               )
           )
           devices = data.get("devices", {})
+          def runtime_version(runtime: str) -> tuple[int, int]:
+              version = runtime.split("iOS-")[-1]
+              major, minor = (int(part) for part in version.split("-")[:2])
+              return (major, minor)
+
           ios_runtimes = sorted(
               (runtime for runtime in devices.keys() if "iOS" in runtime),
+              key=runtime_version,
               reverse=True,
           )
           for runtime in ios_runtimes:
