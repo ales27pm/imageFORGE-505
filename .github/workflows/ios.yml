@@ -2,9 +2,9 @@ name: iOS starter workflow
 
 on:
   push:
-    branches: [ "main" ]
+    branches: ["main"]
   pull_request:
-    branches: [ "main" ]
+    branches: ["main"]
 
 jobs:
   build:
@@ -17,20 +17,23 @@ jobs:
       - name: Set Default Scheme
         run: |
           scheme_list=$(xcodebuild -list -json | tr -d "\n")
-          default=$(echo $scheme_list | ruby -e "require 'json'; puts JSON.parse(STDIN.gets)['project']['targets'][0]")
-          echo $default | cat >default
+          default=$(echo "$scheme_list" | ruby -e "require 'json'; puts JSON.parse(STDIN.gets)['project']['targets'][0]")
+          echo "$default" | cat >default
           echo Using default scheme: $default
-      - name: Build
-        env:
-          scheme: ${{ 'default' }}
-          platform: ${{ 'iOS Simulator' }}
+      - name: Select iPhone Simulator
+        id: select-simulator
         run: |
+          set -euo pipefail
           device_metadata=$(python3 - <<'PY'
           import json
           import subprocess
           import sys
 
-          data = json.loads(subprocess.check_output(["xcrun", "simctl", "list", "devices", "available", "-j"]))
+          data = json.loads(
+              subprocess.check_output(
+                  ["xcrun", "simctl", "list", "devices", "available", "-j"]
+              )
+          )
           devices = data.get("devices", {})
           ios_runtimes = sorted(
               (runtime for runtime in devices.keys() if "iOS" in runtime),
@@ -48,39 +51,29 @@ jobs:
           )
           device_name="${device_metadata%%|*}"
           device_os="${device_metadata##*|}"
-          if [ $scheme = default ]; then scheme=$(cat default); fi
+          {
+            echo "device_name=${device_name}"
+            echo "device_os=${device_os}"
+          } >> "$GITHUB_OUTPUT"
+      - name: Build
+        env:
+          scheme: ${{ 'default' }}
+          platform: ${{ 'iOS Simulator' }}
+        run: |
+          device_name="${{ steps.select-simulator.outputs.device_name }}"
+          device_os="${{ steps.select-simulator.outputs.device_os }}"
+          if [ "$scheme" = default ]; then scheme=$(cat default); fi
           if [ "`ls -A | grep -i \\.xcworkspace\$`" ]; then filetype_parameter="workspace" && file_to_build="`ls -A | grep -i \\.xcworkspace\$`"; else filetype_parameter="project" && file_to_build="`ls -A | grep -i \\.xcodeproj\$`"; fi
-          file_to_build=`echo $file_to_build | awk '{$1=$1;print}'`
+          file_to_build=`echo "$file_to_build" | awk '{$1=$1;print}'`
           xcodebuild build-for-testing -scheme "$scheme" -"$filetype_parameter" "$file_to_build" -destination "platform=$platform,name=$device_name,OS=$device_os"
       - name: Test
         env:
           scheme: ${{ 'default' }}
           platform: ${{ 'iOS Simulator' }}
         run: |
-          device_metadata=$(python3 - <<'PY'
-          import json
-          import subprocess
-          import sys
-
-          data = json.loads(subprocess.check_output(["xcrun", "simctl", "list", "devices", "available", "-j"]))
-          devices = data.get("devices", {})
-          ios_runtimes = sorted(
-              (runtime for runtime in devices.keys() if "iOS" in runtime),
-              reverse=True,
-          )
-          for runtime in ios_runtimes:
-              for device in devices.get(runtime, []):
-                  name = device.get("name", "")
-                  if name.startswith("iPhone") and device.get("isAvailable", False):
-                      os_version = runtime.split("iOS-")[-1].replace("-", ".")
-                      print(f"{name}|{os_version}")
-                      sys.exit(0)
-          sys.exit("No available iPhone simulator found.")
-          PY
-          )
-          device_name="${device_metadata%%|*}"
-          device_os="${device_metadata##*|}"
-          if [ $scheme = default ]; then scheme=$(cat default); fi
+          device_name="${{ steps.select-simulator.outputs.device_name }}"
+          device_os="${{ steps.select-simulator.outputs.device_os }}"
+          if [ "$scheme" = default ]; then scheme=$(cat default); fi
           if [ "`ls -A | grep -i \\.xcworkspace\$`" ]; then filetype_parameter="workspace" && file_to_build="`ls -A | grep -i \\.xcworkspace\$`"; else filetype_parameter="project" && file_to_build="`ls -A | grep -i \\.xcodeproj\$`"; fi
-          file_to_build=`echo $file_to_build | awk '{$1=$1;print}'`
+          file_to_build=`echo "$file_to_build" | awk '{$1=$1;print}'`
           xcodebuild test-without-building -scheme "$scheme" -"$filetype_parameter" "$file_to_build" -destination "platform=$platform,name=$device_name,OS=$device_os"
