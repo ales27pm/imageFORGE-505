@@ -2,9 +2,9 @@ name: iOS Build with Expo
 
 on:
   push:
-    branches: [ "main" ]
+    branches: ["main"]
   pull_request:
-    branches: [ "main" ]
+    branches: ["main"]
 
 jobs:
   build:
@@ -14,41 +14,72 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: Install dependencies
-        run: bun install
-
-      - name: Setup Expo CLI
-        run: npm install -g expo-cli eas-cli
-
-      - name: Expo Prebuild for iOS
-        run: npx expo prebuild --platform ios --clean
-
-      - name: Install CocoaPods dependencies
+      - name: Set Default Scheme
         run: |
-          cd ios
-          pod install
-
-      - name: Build iOS app with xcodebuild
+          scheme_list=$(xcodebuild -list -json | tr -d "\n")
+          default=$(echo "$scheme_list" | ruby -e "require 'json'; puts JSON.parse(STDIN.gets)['project']['targets'][0]")
+          echo "$default" | cat >default
+          echo Using default scheme: $default
+      - name: Select iPhone Simulator
+        id: select-simulator
         run: |
-          cd ios
-          xcodebuild -workspace imageFORGE.xcworkspace \
-            -scheme imageFORGE \
-            -configuration Release \
-            -sdk iphonesimulator \
-            -destination 'platform=iOS Simulator,name=iPhone 15,OS=latest' \
-            clean build \
-            CODE_SIGNING_ALLOWED=NO
+          set -euo pipefail
+          device_metadata=$(python3 - <<'PY'
+          import json
+          import subprocess
+          import sys
 
-      - name: Run tests
-        run: bun test
+          data = json.loads(
+              subprocess.check_output(
+                  ["xcrun", "simctl", "list", "devices", "available", "-j"]
+              )
+          )
+          devices = data.get("devices", {})
+          def runtime_version(runtime: str) -> tuple[int, int]:
+              version = runtime.split("iOS-")[-1]
+              major, minor = (int(part) for part in version.split("-")[:2])
+              return (major, minor)
+
+          ios_runtimes = sorted(
+              (runtime for runtime in devices.keys() if "iOS" in runtime),
+              key=runtime_version,
+              reverse=True,
+          )
+          for runtime in ios_runtimes:
+              for device in devices.get(runtime, []):
+                  name = device.get("name", "")
+                  if name.startswith("iPhone") and device.get("isAvailable", False):
+                      os_version = runtime.split("iOS-")[-1].replace("-", ".")
+                      print(f"{name}|{os_version}")
+                      sys.exit(0)
+          sys.exit("No available iPhone simulator found.")
+          PY
+          )
+          device_name="${device_metadata%%|*}"
+          device_os="${device_metadata##*|}"
+          {
+            echo "device_name=${device_name}"
+            echo "device_os=${device_os}"
+          } >> "$GITHUB_OUTPUT"
+      - name: Build
+        env:
+          scheme: ${{ 'default' }}
+          platform: ${{ 'iOS Simulator' }}
+        run: |
+          device_name="${{ steps.select-simulator.outputs.device_name }}"
+          device_os="${{ steps.select-simulator.outputs.device_os }}"
+          if [ "$scheme" = default ]; then scheme=$(cat default); fi
+          if [ "`ls -A | grep -i \\.xcworkspace\$`" ]; then filetype_parameter="workspace" && file_to_build="`ls -A | grep -i \\.xcworkspace\$`"; else filetype_parameter="project" && file_to_build="`ls -A | grep -i \\.xcodeproj\$`"; fi
+          file_to_build=`echo "$file_to_build" | awk '{$1=$1;print}'`
+          xcodebuild build-for-testing -scheme "$scheme" -"$filetype_parameter" "$file_to_build" -destination "platform=$platform,name=$device_name,OS=$device_os"
+      - name: Test
+        env:
+          scheme: ${{ 'default' }}
+          platform: ${{ 'iOS Simulator' }}
+        run: |
+          device_name="${{ steps.select-simulator.outputs.device_name }}"
+          device_os="${{ steps.select-simulator.outputs.device_os }}"
+          if [ "$scheme" = default ]; then scheme=$(cat default); fi
+          if [ "`ls -A | grep -i \\.xcworkspace\$`" ]; then filetype_parameter="workspace" && file_to_build="`ls -A | grep -i \\.xcworkspace\$`"; else filetype_parameter="project" && file_to_build="`ls -A | grep -i \\.xcodeproj\$`"; fi
+          file_to_build=`echo "$file_to_build" | awk '{$1=$1;print}'`
+          xcodebuild test-without-building -scheme "$scheme" -"$filetype_parameter" "$file_to_build" -destination "platform=$platform,name=$device_name,OS=$device_os"
