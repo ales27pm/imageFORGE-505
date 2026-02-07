@@ -2,7 +2,7 @@ import * as FileSystem from "expo-file-system";
 import { unzipSync } from "fflate";
 import { fromByteArray, toByteArray } from "base64-js";
 
-const base64Encoding = FileSystem.EncodingType.Base64;
+const base64Encoding = (FileSystem as any).EncodingType?.Base64 ?? "base64";
 
 async function ensureDirectory(path: string) {
   await FileSystem.makeDirectoryAsync(path, { intermediates: true });

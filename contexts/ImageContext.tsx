@@ -19,6 +19,7 @@ import {
 } from "@/utils/imageGeneration";
 import { isLocalGenerationAvailable } from "@/modelManager";
 
+const documentDirectory = (FileSystem as any).documentDirectory ?? "";
 const STORAGE_KEY = "ai_forge_images";
 const MAX_STORED_IMAGES = 10;
 const imagesDir =
@@ -69,7 +70,7 @@ export const [ImageProvider, useImages] = createContextHook(() => {
         console.log("[ImageContext] Generating image locally with Core ML");
         await ensureImagesDirExists(imagesDir);
         const savePath = buildImagePath(
-          imagesDir?.uri ?? FileSystem.documentDirectory ?? "",
+          imagesDir?.uri ?? documentDirectory,
           imageId,
           "image/jpeg",
         );

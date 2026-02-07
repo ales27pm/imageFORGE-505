@@ -3,6 +3,8 @@ import * as FileSystem from "expo-file-system";
 import { getManifestExtra } from "@/utils/manifestExtra";
 import { unzipFileWithFflate } from "@/utils/unzip";
 
+const documentDirectory = (FileSystem as any).documentDirectory ?? "";
+
 let ExpoStableDiffusion: any;
 type Unzipper = (source: string, destination: string) => Promise<void>;
 let unzipArchive: Unzipper | null = null;
@@ -58,7 +60,7 @@ function requireExpoStableDiffusion() {
   return stableDiffusion;
 }
 
-const MODEL_PARENT_DIR = (FileSystem.documentDirectory || "") + "Model/";
+const MODEL_PARENT_DIR = documentDirectory + "Model/";
 export const MODEL_DIR = `${MODEL_PARENT_DIR}stable-diffusion-2-1/`;
 const MODEL_ZIP_PATH = `${MODEL_PARENT_DIR}stable-diffusion-2-1.zip`;
 const DEFAULT_MODEL_ZIP_URL =
