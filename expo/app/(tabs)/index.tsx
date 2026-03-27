@@ -12,7 +12,6 @@ import {
   Animated,
   Image as RNImage,
 } from 'react-native';
-import { Image } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Sparkles, Wand2, ImageIcon, RotateCcw, Check } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
